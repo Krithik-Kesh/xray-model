@@ -1,125 +1,119 @@
-# Chest X-ray YOLO research baseline
+﻿# Chest X-ray YOLO research baseline
 
-Four-class image classification: `normal`, `pneumonia`, `tuberculosis`, `covid19`.
-Includes manifest validation, image preparation, transfer learning, held-out evaluation,
-and single-image inference. No datasets or trained disease weights are included.
+Three classes: **normal, pneumonia, tuberculosis**. UNKNOWN and COVID-19 are excluded.
+This is an experimental classifier, not a clinically validated diagnostic device.
 
-This is a research prototype, not a diagnostic device. A chest X-ray classifier's
-output cannot establish or exclude these infections. Clinical validation is required
-before considering any patient-care use.
+`xray.py` is the active pipeline. `xray.original.py` preserves the original starter.
 
-## Label design comes first
+## Corrected data assignments
 
-COVID-19 can cause pneumonia, and diseases can coexist. This baseline uses one
-mutually exclusive, curated label per image. Define `pneumonia` as non-COVID
-pneumonia for this experiment and exclude ambiguous/co-infected examples rather
-than silently relabeling them. If co-occurring labels must be preserved, use a
-multi-label architecture/loss instead of this softmax YOLO classifier.
+Use `data/splits/manifest_pixels.csv`, not the original physical train/val/test folders.
+The new manifest excludes 1,357 UNKNOWN images and preserves original metadata.
 
-Include normal controls. `normal` means the dataset's normal label, not proof of
-absence of disease. Other abnormalities are outside this model's scope; it always
-chooses one of the four classes, even for unrelated inputs. Scores are not calibrated
-clinical probabilities. Image classification does not produce abnormality boxes;
-localization requires location annotations and a separate detection pipeline.
+| Class | Train | Validation | Test |
+| --- | ---: | ---: | ---: |
+| normal | 3842 | 823 | 824 |
+| pneumonia | 2991 | 641 | 641 |
+| tuberculosis | 2949 | 622 | 626 |
+| Total | 9782 | 2086 | 2091 |
 
-## Windows setup
+The decoded-pixel scan found additional identical images with different file bytes.
+`repair-pixel-splits.py` moved 12 assignments to keep their connected groups together.
+The prior manifest and per-split CSVs remain for provenance; use manifest_pixels.csv
+for preparation. The repair details are in data/splits/pixel_repair.json.
 
-Install Python 3.11 or 3.12, then run in PowerShell:
+Duplicate files and matching patient filename groups remain in one split. Patient
+IDs inferred from filenames are marked unverified; 7,303 images have unavailable
+IDs, which remain blank. group_id is a technical grouping key, not a confirmed
+patient identity. See data/splits/README.md for grouping details and limitations.
+
+## Environment
+
+Python 3.12 and a local virtual environment have been installed. To recreate:
 
 ```powershell
-py -3.11 -m venv .venv
+py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Use `py -3.12` instead if that is the installed version. Dependencies are bounded
-but not locked; freeze the successfully tested environment for reproducible runs.
-The model checkpoint downloads on first training use and requires internet access.
-CPU is the default; for an NVIDIA GPU, install the appropriate PyTorch build from
-https://pytorch.org/get-started/locally/ and use `--device 0`.
+Choose `.venv\Scripts\python.exe` as the VS Code interpreter. Activation is optional.
+The tested dependencies are recorded in requirements.lock.txt when installation completes.
 
-## Prepare Kaggle data
-
-Keep downloads under `data/raw/` (ignored by version control). Supply the actual
-dataset links or folder paths before writing a dataset-specific importer: Kaggle
-datasets vary in label spelling, directory layout, patient identifiers, and splits.
-Check each dataset's license and original source, and retain its provenance.
-
-Create `data/manifest.csv` following `manifest.example.csv`. The example shows the
-schema only; it is not a complete dataset. Columns:
-
-| Column | Meaning |
-| --- | --- |
-| path | PNG/JPEG path, relative to the manifest directory or absolute |
-| label | Exactly `normal`, `pneumonia`, `tuberculosis`, or `covid19` |
-| patient_id | Stable, pseudonymous patient identifier |
-| source | Dataset/site identifier for auditing |
-| split | Exactly `train`, `val`, or `test` |
-
-Assign all images of a patient to one split, typically approximately 70/15/15 by
-patient while preserving class coverage. Keep an official held-out test set intact.
-Identifiers must be globally consistent: namespace unrelated IDs by their original
-source, and reconcile the same patient across repackaged datasets. Do not invent
-one patient ID per image when patient metadata is absent; patient-independent
-evaluation cannot be claimed in that situation.
-
-Use frontal chest X-rays with compatible acquisition views/populations. Do not mix
-CT scans, lateral views, segmentation masks, or annotated copies into this baseline.
-Convert DICOM with reviewed windowing and photometric interpretation before import;
-this script intentionally accepts PNG/JPEG only. Remove identifying information
-before adding images. The audit file contains patient IDs and local paths: keep it private.
+## Prepare and train
 
 ```powershell
-.\.venv\Scripts\python.exe xray.py prepare --manifest data/manifest.csv --output data/prepared
+.\.venv\Scripts\python.exe xray.py prepare
+.\.venv\Scripts\python.exe xray.py smoke
+.\.venv\Scripts\python.exe xray.py train --epochs 50 --device cpu
 ```
 
-Preparation checks required metadata, class coverage in each split, patient overlap,
-repeated paths, and decoded-pixel duplicates crossing splits or conflicting labels.
-It resizes and pads to 320×320 while preserving aspect ratio. It refuses to overwrite
-an existing output directory. Validation completes before output creation, though
-an interrupted image write can leave a partial output; use a fresh output path.
+Preparation follows the corrected CSV and writes padded 320x320 PNGs to
+`data/prepared_three_class/`. It verifies current file hashes, patient/group overlap,
+and decoded-pixel duplicates across splits or labels. The original images stay
+unchanged. Source metadata and patient ID status are retained in audit.json.
+Existing outputs are never overwritten. An interrupted run leaves a .incomplete
+folder for inspection; a complete directory appears only after success.
 
-Checks cannot identify all repackaged patients or resized/recompressed duplicates.
-Review near-duplicates and original metadata manually. Keep `data/prepared` immutable
-after preparation; training trusts its audit. Source/site confounding remains a major
-risk when each disease comes from a different dataset. Include multiple sources per
-class, inspect class/source counts, and reserve an independent site for external validation.
+The smoke test uses 36 training and 18 validation images at 64 pixels for one epoch.
+It selects unique groups within each class/split and never loads test images. Its
+scores are for pipeline checking only. It refuses to overwrite its existing subset.
 
-## Train, evaluate, predict
+To repeat the smoke test, pass a fresh subset folder with `--output data/smoke_next`.
+The verified run uses data/smoke_verified and saved its checkpoint under
+runs/classify/smoke_three_class/weights/best.pt. It is not the full trained model.
+
+Full training uses a pretrained yolo26n-cls checkpoint, batch 16, seed 42, early
+stopping patience 15, and validation for checkpoint selection. Random scaling,
+flips, automatic augmentation, erasing, and color jitter are disabled. The checkpoint
+downloads on first use. Repeated runs can have incremented output directory names.
+Use the actual checkpoint path printed by training.
+
+CPU is the default. An RTX 2070 (8 GB) is present, but CUDA training requires a
+compatible CUDA-enabled PyTorch installation. Check before using --device 0:
 
 ```powershell
-.\.venv\Scripts\python.exe xray.py train --data data/prepared --epochs 50 --device cpu
-.\.venv\Scripts\python.exe xray.py evaluate --data data/prepared --weights runs/classify/chest_xray/weights/best.pt
+.\.venv\Scripts\python.exe -c "import torch; print(torch.__version__); print(torch.cuda.is_available())"
+```
+
+For a GPU build, follow https://pytorch.org/get-started/locally/.
+
+## Evaluate and predict
+
+```powershell
+.\.venv\Scripts\python.exe xray.py evaluate --weights runs/classify/chest_xray/weights/best.pt
 .\.venv\Scripts\python.exe xray.py predict --weights runs/classify/chest_xray/weights/best.pt --image data/example.png
 ```
 
-Ultralytics can increment the run directory when the name already exists; use the
-actual path printed by training. Choose hyperparameters using validation data only.
-The `evaluate` command explicitly uses `test` and saves Ultralytics evaluation plots
-and metrics. Do not repeatedly tune against test performance.
+Evaluate only after selecting settings with validation data. Evaluation explicitly
+uses the prepared test split. Prediction applies square padding and uses the saved
+training input size, or an explicit --size. Outputs are three class scores, not
+calibrated clinical probabilities. There are no abnormality boxes or multi-label outputs.
 
-The pretrained checkpoint is `yolo26n-cls.pt`; override with `--model` as needed.
-Training disables random erasing, automatic augmentation, color jitter and flips.
-Square padded inputs and disabled scaling avoid the default random crop discarding
-lung regions. Inference repeats the square padding and uses the saved model input size;
-if using an externally produced checkpoint, pass the correct `--size` explicitly.
+## Checks and limitations
 
-Before drawing conclusions, report per-class sensitivity, specificity, precision,
-F1, AUROC, confusion matrices, patient-level confidence intervals, calibration,
-and performance on independent sites and demographic/acquisition subgroups.
-Aggregate top-1 accuracy from this baseline is insufficient to assess clinical utility.
-No accuracy or clinical performance is claimed here.
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
 
-## References
+Tests cover missing patient IDs, group leakage, identical decoded pixels with
+different file bytes, changed images, and full-image padding. Audit and preparation
+metadata are stored under data/; smoke artifacts are under runs/classify/.
 
-- [Ultralytics classification and preprocessing](https://docs.ultralytics.com/tasks/classify/)
-- [Ultralytics classification folder format](https://docs.ultralytics.com/datasets/classify/)
-- [VinDr-CXR original dataset: pneumonia and tuberculosis annotations](https://physionet.org/content/vindr-cxr/1.0.0/)
-- [COVID-19 Image Data Collection and evaluation cautions](https://github.com/ieee8023/covid-chestxray-dataset)
+Verified locally: six tests passed, all 13,959 images prepared successfully, and a
+one-epoch smoke run saved/reloaded its three-class checkpoint. Single-image prediction
+and the custom validator passed using validation images only. No held-out test metrics
+or full 50-epoch results have been produced. The installed torch build is CPU-only.
 
-Review Ultralytics' AGPL-3.0/enterprise licensing terms before distribution or deployment.
+Patient independence is not verified. Near-duplicates and patients with unrelated
+filenames may remain; source/population confounding is unresolved. Identical images
+within one split remain included and can overweight some examples in metrics.
+Report per-class performance, calibration, uncertainty, and external-site evaluation
+before drawing conclusions; aggregate accuracy alone is insufficient.
 
-## Verification status
+Data, audit metadata, environments and checkpoints are ignored by version control.
+Review dataset and Ultralytics AGPL-3.0/enterprise licensing before distribution.
 
-The project was created in an environment without an installed Python interpreter.
-Dependency installation, runtime checks, training, and evaluation have not been run.
-Actual dataset mapping and training await the Kaggle links/files.
+References:
+- https://docs.ultralytics.com/tasks/classify/
+- https://docs.ultralytics.com/datasets/classify/
+- https://www.kaggle.com/datasets/rifatulmajumder23/combined-unknown-pneumonia-and-tuberculosis

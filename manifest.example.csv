@@ -1,5 +1,4 @@
-path,label,patient_id,source,split
-downloads/normal/patient001.png,normal,patient001,kaggle_dataset_a,train
-downloads/pneumonia/patient002.png,pneumonia,patient002,kaggle_dataset_a,val
-downloads/tuberculosis/patient003.png,tuberculosis,patient003,kaggle_dataset_b,test
-downloads/covid/patient004.png,covid19,patient004,kaggle_dataset_c,train
+path,label,patient_id,patient_id_status,source,split,group_id,sha256
+downloads/normal/patient001.png,normal,source_a:patient001,filename_inferred_unverified,source_a,train,group001,REPLACE_WITH_FILE_SHA256
+downloads/pneumonia/image002.png,pneumonia,,unavailable,source_a,val,group002,REPLACE_WITH_FILE_SHA256
+downloads/tuberculosis/patient003.png,tuberculosis,source_b:patient003,filename_inferred_unverified,source_b,test,group003,REPLACE_WITH_FILE_SHA256
