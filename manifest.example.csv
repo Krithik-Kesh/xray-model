@@ -1,0 +1,5 @@
+path,label,patient_id,source,split
+downloads/normal/patient001.png,normal,patient001,kaggle_dataset_a,train
+downloads/pneumonia/patient002.png,pneumonia,patient002,kaggle_dataset_a,val
+downloads/tuberculosis/patient003.png,tuberculosis,patient003,kaggle_dataset_b,test
+downloads/covid/patient004.png,covid19,patient004,kaggle_dataset_c,train
